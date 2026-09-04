@@ -65,8 +65,12 @@ rather than answering without the integrity rules in place.
 ## Repository layout
 
 ```
+HANDOFF.md                      fuller context: goals, true current status, next steps
 current-build/
   cwm-knowledge-base.html       the interim single-file build, see note below
+scripts/
+  patch_ai.py                  applies the phase 2 retrieval changes to a base file
+  test_ai.js                   46-test jsdom suite backing those changes
 supabase/
   migrations/
     0001_wines.sql              wines + grapes + critic links + sources
