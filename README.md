@@ -21,12 +21,13 @@ Schema, data, Edge Function, auth and hosting are all live.
 |---|---|
 | Supabase project | `cwm-knowledge-base`, eu-west-1. Schema applied, RLS on, populated. |
 | GitHub | `dm1305/CWMKB` is the authoritative repo, this working copy tracks it |
-| Migrations 0001 to 0006 | **Applied.** 0004 enables RLS; 0005 adds `staff_profiles` approval-gated access; 0006 changes `wines.stock` to text (real values like "120+" aren't integers) |
+| Migrations 0001 to 0008 | **Applied.** 0004 enables RLS; 0005 adds `staff_profiles` approval-gated access; 0006 changes `wines.stock` to text (real values like "120+" aren't integers); 0007 fixes RLS performance (`(select auth.uid())`) and adds `approve_staff()`; 0008 locks that function down so an unapproved account can't call it on themselves |
 | Wine data | **Loaded.** All 1,513 wines + 1,669 grapes + 6,052 critic links + 40 sources, via `scripts/migrate_wines.py`. One-time load, re-running it against a non-empty `wines` table will duplicate every row — see the product-code note below |
 | `supabase/functions/ask` | **Deployed**, `verify_jwt: true`. Still 503s until `ANTHROPIC_API_KEY` / `CWM_SYSTEM_PROMPT` secrets are set |
-| Auth | **Self-service sign-up, gated by admin approval** (not invite-only — that was reversed after the Supabase invite/recovery email flow proved too unreliable to keep debugging; see `staff_profiles`). Approve new accounts in the Supabase dashboard's Table Editor by setting `approved_at`. "Confirm email" still needs disabling in Auth settings for sign-up to be instant rather than another email round-trip |
+| Auth | **Self-service sign-up, gated by admin approval** (not invite-only — that was reversed after the Supabase invite/recovery email flow proved too unreliable to keep debugging; see `staff_profiles`). Approve new accounts by running `select approve_staff('<user_id>');` in the Supabase SQL Editor. "Confirm email" still needs disabling in Auth settings for sign-up to be instant rather than another email round-trip |
 | Hosting | **Live** at `https://cwm-knowledge-base.pages.dev` (Cloudflare Pages). No Cloudflare Access in front of it yet — the page's login gate is a UX layer, not real protection, since the HTML build still embeds all data client-side (see note below) |
-| Live site rebuild on push/webhook | Not yet built. Deploys are manual (`wrangler pages deploy`) for now |
+| Tests | `scripts/test_ai.js` (46, retrieval logic) + `scripts/test_auth.js` (18, sign-up/approval flow), both passing. `.github/workflows/test.yml` runs both on push/PR to `main` — no deploy step, no Cloudflare token is configured as a repo secret |
+| Live site rebuild on push/webhook | Not yet built. Deploys are manual (`wrangler pages deploy`) for now. Bigger than that: the site doesn't read from Supabase for content at all yet — every tab still runs off the JS constants embedded in the HTML file, so the migrated data isn't actually in use. Next big piece of work, not a quick fix |
 
 ## Before running the migrations
 
@@ -44,7 +45,7 @@ that file:
 
 ## Running the migrations
 
-0001 to 0006 are applied to `jhixcmtbigyjqhjtiaik` already. Any new migration
+0001 to 0008 are applied to `jhixcmtbigyjqhjtiaik` already. Any new migration
 after this point:
 
 ```bash
@@ -89,11 +90,13 @@ rather than answering without the integrity rules in place.
 
 ```
 HANDOFF.md                      fuller context: goals, true current status, next steps
+.github/workflows/test.yml      runs both test suites on push/PR, no deploy step
 current-build/
   cwm-knowledge-base.html       the interim single-file build, see note below
 scripts/
   patch_ai.py                  applies the phase 2 retrieval changes to a base file
-  test_ai.js                   46-test jsdom suite backing those changes
+  test_ai.js                   46-test jsdom suite, retrieval logic
+  test_auth.js                 18-test jsdom suite, sign-up/approval flow
   migrate_wines.py             one-time wine data load, see above
 supabase/
   migrations/
@@ -103,6 +106,8 @@ supabase/
     0004_enable_rls.sql         authenticated-only read policies on the six tables above
     0005_staff_approval.sql     staff_profiles + approval-gated read policies
     0006_stock_to_text.sql      wines.stock int -> text, real values include "120+"
+    0007_perf_and_approval_fn.sql   RLS perf fix + approve_staff() function
+    0008_lock_down_approve_staff.sql   revokes default EXECUTE grant on approve_staff()
   functions/
     ask/
       index.ts                  Anthropic proxy, key never reaches the browser

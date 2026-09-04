@@ -1,8 +1,28 @@
 const { JSDOM } = require('jsdom');
 const fs = require('fs');
+const path = require('path');
 
-const html = fs.readFileSync('/mnt/user-data/outputs/cwm-knowledge-base.html', 'utf8');
-const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true });
+const html = fs.readFileSync(path.join(__dirname, '..', 'current-build', 'cwm-knowledge-base.html'), 'utf8');
+const dom = new JSDOM(html, {
+  runScripts: 'dangerously', pretendToBeVisual: true,
+  // the page loads supabase-js from a CDN <script src>, which jsdom won't
+  // fetch without a real network resource loader. Stub it before the
+  // inline script runs so sb=supabase.createClient(...) doesn't throw and
+  // take the whole retrieval-logic test suite down with it.
+  beforeParse(window) {
+    window.supabase = { createClient: () => ({
+      auth: {
+        onAuthStateChange: () => {},
+        getSession: () => Promise.resolve({ data: { session: null } }),
+        signInWithPassword: () => Promise.resolve({ error: null }),
+        signUp: () => Promise.resolve({ data: {}, error: null }),
+        updateUser: () => Promise.resolve({ error: null }),
+        signOut: () => Promise.resolve({ error: null }),
+      },
+      from: () => ({ select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null }) }) }), insert: () => Promise.resolve({}) }),
+    }) };
+  },
+});
 const win = dom.window;
 
 let pass = 0, fail = 0;
