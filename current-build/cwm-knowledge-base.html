@@ -545,10 +545,10 @@ table.rec td{padding:9px 12px;border-bottom:1px solid var(--chalk-1)}
 <div id="gate"><div class="gc">
 <div class="m">Cambridge Wine <span style="color:#5C6B64">·</span> Knowledge Base</div>
 <h2>Sign in to continue</h2><p>Accounts are added by invitation. Ask the buying team for access.</p>
-<label class="fld"><span>Email</span><input type="email" placeholder="you@cambridgewine.com"></label>
-<label class="fld"><span>Password</span><input type="password" placeholder="••••••••"></label>
+<label class="fld"><span>Email</span><input type="email" id="gateemail" placeholder="you@cambridgewine.com" autocomplete="username"></label>
+<label class="fld"><span>Password</span><input type="password" id="gatepass" placeholder="••••••••" autocomplete="current-password"></label>
 <button class="pbtn" id="signin">Sign in</button>
-<p style="margin-top:20px;font-size:12px;color:#6B7A72">Mockup. Sign in with anything to look around.</p>
+<p id="gateerr" style="margin-top:12px;font-size:12.5px;color:#B3312C;min-height:1.2em"></p>
 </div></div>
 
 <header><div class="wrap bar">
@@ -564,7 +564,7 @@ table.rec td{padding:9px 12px;border-bottom:1px solid var(--chalk-1)}
  <button data-p="p-ask">Ask</button>
 </nav>
 <button class="glbtn" id="glopen">Glossary · 179</button>
-<div class="who">RP</div>
+<div class="who" id="whoavatar" style="cursor:pointer"></div>
 </div></header>
 
 <!-- HOME -->
@@ -779,17 +779,6 @@ table.rec td{padding:9px 12px;border-bottom:1px solid var(--chalk-1)}
   <p>It reads only what is in this knowledge base. It will tell you when something has not been sourced rather than filling the gap in for you.</p>
  </div></div>
  <div class="wrap"><div class="ask">
-  <div class="keycard" id="keycard">
-   <h3>Staff sign in</h3>
-   <p>The AI advisor calls a server-side proxy that holds the Anthropic key. No key ever reaches this page; you just need to be a signed-in, invited member of staff.</p>
-   <div class="keyrow">
-    <label><span>Email</span><input type="email" id="loginemail" placeholder="you@cambridgewine.co.uk" autocomplete="username"></label>
-    <label><span>Password</span><input type="password" id="loginpass" placeholder="••••••••" autocomplete="current-password"></label>
-    <button class="save" style="width:auto;padding:11px 22px" id="signin">Sign in</button>
-   </div>
-   <p id="loginerr" style="color:#B3312C;min-height:1.2em"></p>
-   <p style="font-size:12.5px;color:#8A948D">No public sign-up. Accounts are created by invite, ask your manager if you don't have one yet.</p>
-  </div>
   <div class="chat" id="chat"></div>
   <div class="starters" id="starters"></div>
   <div class="askbar"><textarea id="askin" placeholder="Ask about a wine, a region, a vintage or a compliance rule" disabled></textarea>
@@ -974,7 +963,6 @@ function go(id){document.querySelectorAll('.page').forEach(p=>p.classList.toggle
  document.querySelectorAll('nav button').forEach(b=>b.dataset.p===id?b.setAttribute('aria-current','page'):b.removeAttribute('aria-current'));
  scrollTo({top:0});if(id==='p-reg')glossifyGuide()}
 document.querySelectorAll('nav button,.tile[data-p]').forEach(b=>b.onclick=()=>go(b.dataset.p));
-document.getElementById('signin').onclick=()=>document.getElementById('gate').classList.add('off');
 
 /* glossify the region guide prose once */
 let guideDone=false;
@@ -1916,33 +1904,43 @@ const STARTERS=["What grapes are in the Estaca and how do we know?",
 document.getElementById('starters').innerHTML=STARTERS.map(s=>'<button class="starter">'+s+'</button>').join('');
 document.getElementById('starters').addEventListener('click',e=>{
  const b=e.target.closest('.starter'); if(!b)return;
- if(!SESSION){document.getElementById('loginemail').focus();return}
+ if(!SESSION)return;
  ask(b.textContent);});
 
+function initials(email){
+ const name=(email||'').split('@')[0];
+ return (name.slice(0,2)||'?').toUpperCase();
+}
 function onSignedIn(session){
  SESSION=session;
- document.getElementById('keycard').innerHTML='<h3>Signed in</h3><p>'+(session.user.email||'Connected')
-  +' &middot; <a href="#" id="signout" style="color:inherit">Sign out</a></p>';
- document.getElementById('signout').onclick=(e)=>{e.preventDefault(); sb.auth.signOut();};
+ document.getElementById('gate').classList.add('off');
+ const who=document.getElementById('whoavatar');
+ who.textContent=initials(session.user.email);
+ who.title=(session.user.email||'')+' · click to sign out';
+ who.onclick=()=>sb.auth.signOut();
  document.getElementById('askin').disabled=false; document.getElementById('asksend').disabled=false;
 }
 function onSignedOut(){
  SESSION=null;
+ document.getElementById('gate').classList.remove('off');
+ document.getElementById('gateemail').value=''; document.getElementById('gatepass').value='';
  document.getElementById('askin').disabled=true; document.getElementById('asksend').disabled=true;
 }
 sb.auth.onAuthStateChange((_event,session)=>{ if(session) onSignedIn(session); else onSignedOut(); });
 sb.auth.getSession().then(({data})=>{ if(data.session) onSignedIn(data.session); });
 
 document.getElementById('signin').onclick=async ()=>{
- const email=document.getElementById('loginemail').value.trim();
- const pass=document.getElementById('loginpass').value;
- const errEl=document.getElementById('loginerr'); errEl.textContent='';
+ const email=document.getElementById('gateemail').value.trim();
+ const pass=document.getElementById('gatepass').value;
+ const errEl=document.getElementById('gateerr'); errEl.textContent='';
  if(!email||!pass){errEl.textContent='Enter your email and password.';return}
  const btn=document.getElementById('signin'); btn.disabled=true;
  const {error}=await sb.auth.signInWithPassword({email,password:pass});
  btn.disabled=false;
  if(error) errEl.textContent=error.message;
 };
+document.getElementById('gatepass').addEventListener('keydown',e=>{
+ if(e.key==='Enter'){e.preventDefault();document.getElementById('signin').click()}});
 document.getElementById('asksend').onclick=()=>ask(document.getElementById('askin').value);
 document.getElementById('askin').addEventListener('keydown',e=>{
  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask(e.target.value)}});
