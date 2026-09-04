@@ -13,16 +13,17 @@ Staff-facing wine, spirits, and beer/cider knowledge base and AI advisor.
 A change to either should flow through to the live site automatically. That
 automation does not exist yet; see Status below.
 
-## Status, as of 2 September 2026
+## Status, as of 4 September 2026
 
-Written but not yet applied or deployed. Nothing in this repo is live.
+Schema is live. Repo is connected. Edge Function and auth are not yet done.
 
 | Piece | State |
 |---|---|
-| Supabase project | Created (`cwm-knowledge-base`, eu-west-1). Empty. |
-| Migrations 0001 to 0003 | Written, reviewed, **not yet run** against the project |
-| `supabase/functions/ask` | Written, **not yet deployed** |
-| Auth (invited staff only) | Not yet configured |
+| Supabase project | Created (`cwm-knowledge-base`, eu-west-1). Schema applied, empty of wine data. |
+| GitHub | `dm1305/CWMKB` is the authoritative repo, this working copy tracks it |
+| Migrations 0001 to 0004 | **Applied.** 0004 enables RLS (authenticated-only read) on the six tables the security advisor flagged as exposed; advisor is clean after |
+| `supabase/functions/ask` | Written, **not yet deployed**. Blocked on confirming the old exposed Anthropic key was rotated |
+| Auth (invited staff only, no public signup) | Not yet configured. Disabling signup and inviting staff happens in the Supabase dashboard, not scriptable here |
 | Live site rebuild on push/webhook | Not yet built. Site is currently self-hosted; how it deploys hasn't been established, and is being treated as a separate piece of work for now |
 
 ## Before running the migrations
@@ -40,6 +41,9 @@ that file:
    than assumed.
 
 ## Running the migrations
+
+0001 to 0004 are applied to `jhixcmtbigyjqhjtiaik` already. Any new migration
+after this point:
 
 ```bash
 supabase link --project-ref jhixcmtbigyjqhjtiaik
@@ -76,6 +80,7 @@ supabase/
     0001_wines.sql              wines + grapes + critic links + sources
     0002_grape_reference.sql    synonym and region-to-grape reference data
     0003_training_completions.sql   append-only compliance records
+    0004_enable_rls.sql         authenticated-only read policies on the six tables above
   functions/
     ask/
       index.ts                  Anthropic proxy, key never reaches the browser
