@@ -544,11 +544,20 @@ table.rec td{padding:9px 12px;border-bottom:1px solid var(--chalk-1)}
 
 <div id="gate"><div class="gc">
 <div class="m">Cambridge Wine <span style="color:#5C6B64">·</span> Knowledge Base</div>
+<div id="signinpanel">
 <h2>Sign in to continue</h2><p>Accounts are added by invitation. Ask the buying team for access.</p>
 <label class="fld"><span>Email</span><input type="email" id="gateemail" placeholder="you@cambridgewine.com" autocomplete="username"></label>
 <label class="fld"><span>Password</span><input type="password" id="gatepass" placeholder="••••••••" autocomplete="current-password"></label>
 <button class="pbtn" id="signin">Sign in</button>
 <p id="gateerr" style="margin-top:12px;font-size:12.5px;color:#B3312C;min-height:1.2em"></p>
+</div>
+<div id="setpwpanel" style="display:none">
+<h2>Set your password</h2><p>You're invited. Choose a password to finish setting up your account.</p>
+<label class="fld"><span>New password</span><input type="password" id="newpass1" autocomplete="new-password"></label>
+<label class="fld"><span>Confirm password</span><input type="password" id="newpass2" autocomplete="new-password"></label>
+<button class="pbtn" id="setpwbtn">Set password &amp; continue</button>
+<p id="setpwerr" style="margin-top:12px;font-size:12.5px;color:#B3312C;min-height:1.2em"></p>
+</div>
 </div></div>
 
 <header><div class="wrap bar">
@@ -1556,6 +1565,10 @@ document.getElementById('wgrid').addEventListener('click',e=>{const c=e.target.c
 /* ===== ask: retrieval over the knowledge base, then the API ===== */
 const SUPABASE_URL='https://jhixcmtbigyjqhjtiaik.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpoaXhjbXRiaWd5anFoanRpYWlrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgyNjk1MjgsImV4cCI6MjEwMzg0NTUyOH0.nqTSWgRgMV5IQyEcdRbkAu7SWRbJEKv_t7gTvgMBRr4';
+/* captured before createClient touches the URL: invite/recovery links carry
+   type=invite or type=recovery in the hash, and need a "set password" step
+   instead of dropping straight into the app like a normal sign-in */
+const AUTH_URL_TYPE=new URLSearchParams(location.hash.slice(1)).get('type');
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 let SESSION=null;
 const HIST=[];
@@ -1923,11 +1936,28 @@ function onSignedIn(session){
 function onSignedOut(){
  SESSION=null;
  document.getElementById('gate').classList.remove('off');
+ document.getElementById('signinpanel').style.display='';
+ document.getElementById('setpwpanel').style.display='none';
  document.getElementById('gateemail').value=''; document.getElementById('gatepass').value='';
  document.getElementById('askin').disabled=true; document.getElementById('asksend').disabled=true;
 }
-sb.auth.onAuthStateChange((_event,session)=>{ if(session) onSignedIn(session); else onSignedOut(); });
-sb.auth.getSession().then(({data})=>{ if(data.session) onSignedIn(data.session); });
+function showSetPassword(session){
+ SESSION=session;
+ document.getElementById('gate').classList.remove('off');
+ document.getElementById('signinpanel').style.display='none';
+ document.getElementById('setpwpanel').style.display='';
+}
+/* Invite and recovery links land here already signed in to a temporary
+   session, established by supabase-js from the URL hash before this ever
+   runs. That's not a real login yet, they haven't chosen a password, so
+   route it to the set-password panel instead of straight into the app. */
+function handleSession(session){
+ if(!session){ onSignedOut(); return }
+ if(AUTH_URL_TYPE==='invite'||AUTH_URL_TYPE==='recovery'){ showSetPassword(session); return }
+ onSignedIn(session);
+}
+sb.auth.onAuthStateChange((_event,session)=>handleSession(session));
+sb.auth.getSession().then(({data})=>handleSession(data.session));
 
 document.getElementById('signin').onclick=async ()=>{
  const email=document.getElementById('gateemail').value.trim();
@@ -1941,6 +1971,19 @@ document.getElementById('signin').onclick=async ()=>{
 };
 document.getElementById('gatepass').addEventListener('keydown',e=>{
  if(e.key==='Enter'){e.preventDefault();document.getElementById('signin').click()}});
+
+document.getElementById('setpwbtn').onclick=async ()=>{
+ const p1=document.getElementById('newpass1').value;
+ const p2=document.getElementById('newpass2').value;
+ const errEl=document.getElementById('setpwerr'); errEl.textContent='';
+ if(!p1||p1.length<8){errEl.textContent='Password must be at least 8 characters.';return}
+ if(p1!==p2){errEl.textContent='Passwords do not match.';return}
+ const btn=document.getElementById('setpwbtn'); btn.disabled=true;
+ const {error}=await sb.auth.updateUser({password:p1});
+ btn.disabled=false;
+ if(error){errEl.textContent=error.message;return}
+ onSignedIn(SESSION);
+};
 document.getElementById('asksend').onclick=()=>ask(document.getElementById('askin').value);
 document.getElementById('askin').addEventListener('keydown',e=>{
  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask(e.target.value)}});
