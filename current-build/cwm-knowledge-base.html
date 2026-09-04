@@ -1565,15 +1565,23 @@ document.getElementById('wgrid').addEventListener('click',e=>{const c=e.target.c
 /* ===== ask: retrieval over the knowledge base, then the API ===== */
 const SUPABASE_URL='https://jhixcmtbigyjqhjtiaik.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpoaXhjbXRiaWd5anFoanRpYWlrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgyNjk1MjgsImV4cCI6MjEwMzg0NTUyOH0.nqTSWgRgMV5IQyEcdRbkAu7SWRbJEKv_t7gTvgMBRr4';
-/* captured before createClient touches the URL: invite/recovery links carry
-   type=invite or type=recovery in the hash, and need a "set password" step
-   instead of dropping straight into the app like a normal sign-in. A dead
-   link (already used, or expired) redirects back with error_description in
-   the same hash instead of a session, e.g. "Email link is invalid or has
-   expired" - show that instead of silently landing on a blank sign-in form. */
+/* captured before createClient touches the URL. A dead link (already used,
+   or expired) redirects back with error_description in the hash instead of
+   a session, e.g. "Email link is invalid or has expired" - show that
+   instead of silently landing on a blank sign-in form.
+   HAD_URL_AUTH_PARAMS answers "did this page load carry a URL-based auth
+   payload at all" (hash tokens from the implicit flow, or a ?code= from
+   PKCE) without pinning down exactly which shape Supabase used for it -
+   confirmed against this project's real auth logs that assuming a specific
+   type=invite/type=recovery hash param was wrong, a real recovery link's
+   session landed with no matching type field and fell through to the
+   ordinary sign-in screen instead of the set-password panel. Any session
+   that shows up carrying one of these is from an invite/recovery/magic
+   link, not a manual sign-in, and needs a password chosen before it's a
+   real login. */
 const AUTH_URL_PARAMS=new URLSearchParams(location.hash.slice(1));
-const AUTH_URL_TYPE=AUTH_URL_PARAMS.get('type');
 const AUTH_URL_ERROR=AUTH_URL_PARAMS.get('error_description');
+const HAD_URL_AUTH_PARAMS=/access_token=|refresh_token=|type=/.test(location.hash)||/[?&]code=/.test(location.search);
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 let SESSION=null;
 const HIST=[];
@@ -1959,7 +1967,7 @@ function showSetPassword(session){
    route it to the set-password panel instead of straight into the app. */
 function handleSession(session){
  if(!session){ onSignedOut(); return }
- if(AUTH_URL_TYPE==='invite'||AUTH_URL_TYPE==='recovery'){ showSetPassword(session); return }
+ if(HAD_URL_AUTH_PARAMS){ showSetPassword(session); return }
  onSignedIn(session);
 }
 sb.auth.onAuthStateChange((_event,session)=>handleSession(session));
