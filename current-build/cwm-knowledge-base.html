@@ -1567,8 +1567,13 @@ const SUPABASE_URL='https://jhixcmtbigyjqhjtiaik.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpoaXhjbXRiaWd5anFoanRpYWlrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgyNjk1MjgsImV4cCI6MjEwMzg0NTUyOH0.nqTSWgRgMV5IQyEcdRbkAu7SWRbJEKv_t7gTvgMBRr4';
 /* captured before createClient touches the URL: invite/recovery links carry
    type=invite or type=recovery in the hash, and need a "set password" step
-   instead of dropping straight into the app like a normal sign-in */
-const AUTH_URL_TYPE=new URLSearchParams(location.hash.slice(1)).get('type');
+   instead of dropping straight into the app like a normal sign-in. A dead
+   link (already used, or expired) redirects back with error_description in
+   the same hash instead of a session, e.g. "Email link is invalid or has
+   expired" - show that instead of silently landing on a blank sign-in form. */
+const AUTH_URL_PARAMS=new URLSearchParams(location.hash.slice(1));
+const AUTH_URL_TYPE=AUTH_URL_PARAMS.get('type');
+const AUTH_URL_ERROR=AUTH_URL_PARAMS.get('error_description');
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 let SESSION=null;
 const HIST=[];
@@ -1940,6 +1945,7 @@ function onSignedOut(){
  document.getElementById('setpwpanel').style.display='none';
  document.getElementById('gateemail').value=''; document.getElementById('gatepass').value='';
  document.getElementById('askin').disabled=true; document.getElementById('asksend').disabled=true;
+ if(AUTH_URL_ERROR) document.getElementById('gateerr').textContent=AUTH_URL_ERROR+' Ask your admin to send a fresh link.';
 }
 function showSetPassword(session){
  SESSION=session;
