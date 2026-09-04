@@ -545,11 +545,19 @@ table.rec td{padding:9px 12px;border-bottom:1px solid var(--chalk-1)}
 <div id="gate"><div class="gc">
 <div class="m">Cambridge Wine <span style="color:#5C6B64">·</span> Knowledge Base</div>
 <div id="signinpanel">
-<h2>Sign in to continue</h2><p>Accounts are added by invitation. Ask the buying team for access.</p>
+<h2>Sign in to continue</h2><p>Staff knowledge base. <a href="#" id="gotosignup" style="color:inherit">New here? Create an account</a></p>
 <label class="fld"><span>Email</span><input type="email" id="gateemail" placeholder="you@cambridgewine.com" autocomplete="username"></label>
 <label class="fld"><span>Password</span><input type="password" id="gatepass" placeholder="••••••••" autocomplete="current-password"></label>
 <button class="pbtn" id="signin">Sign in</button>
 <p id="gateerr" style="margin-top:12px;font-size:12.5px;color:#B3312C;min-height:1.2em"></p>
+</div>
+<div id="signuppanel" style="display:none">
+<h2>Create an account</h2><p>An admin needs to approve you before you can see anything. <a href="#" id="gotosignin" style="color:inherit">Already have an account? Sign in</a></p>
+<label class="fld"><span>Email</span><input type="email" id="suemail" placeholder="you@cambridgewine.com" autocomplete="username"></label>
+<label class="fld"><span>Password</span><input type="password" id="supass1" placeholder="At least 8 characters" autocomplete="new-password"></label>
+<label class="fld"><span>Confirm password</span><input type="password" id="supass2" placeholder="••••••••" autocomplete="new-password"></label>
+<button class="pbtn" id="signupbtn">Create account</button>
+<p id="signuperr" style="margin-top:12px;font-size:12.5px;color:#B3312C;min-height:1.2em"></p>
 </div>
 <div id="setpwpanel" style="display:none">
 <h2>Set your password</h2><p>You're invited. Choose a password to finish setting up your account.</p>
@@ -557,6 +565,12 @@ table.rec td{padding:9px 12px;border-bottom:1px solid var(--chalk-1)}
 <label class="fld"><span>Confirm password</span><input type="password" id="newpass2" autocomplete="new-password"></label>
 <button class="pbtn" id="setpwbtn">Set password &amp; continue</button>
 <p id="setpwerr" style="margin-top:12px;font-size:12.5px;color:#B3312C;min-height:1.2em"></p>
+</div>
+<div id="pendingpanel" style="display:none">
+<h2>Waiting on approval</h2>
+<p>Your account exists but hasn't been approved yet. Ask an admin to approve <b id="pendingemail"></b> in the Supabase dashboard, then reload this page.</p>
+<button class="pbtn" id="pendingrefresh">I've been approved &mdash; check again</button>
+<p><a href="#" id="pendingsignout" style="color:inherit">Sign out</a></p>
 </div>
 </div></div>
 
@@ -1581,7 +1595,11 @@ const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
    real login. */
 const AUTH_URL_PARAMS=new URLSearchParams(location.hash.slice(1));
 const AUTH_URL_ERROR=AUTH_URL_PARAMS.get('error_description');
-const HAD_URL_AUTH_PARAMS=/access_token=|refresh_token=|type=/.test(location.hash)||/[?&]code=/.test(location.search);
+/* let, not const: cleared once the set-password step completes so a
+   second handleSession call (e.g. after updateUser succeeds) moves
+   forward to the approval check instead of looping back to the same
+   set-password panel forever. */
+let HAD_URL_AUTH_PARAMS=/access_token=|refresh_token=|type=/.test(location.hash)||/[?&]code=/.test(location.search);
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 let SESSION=null;
 const HIST=[];
@@ -1946,11 +1964,17 @@ function onSignedIn(session){
  who.onclick=()=>sb.auth.signOut();
  document.getElementById('askin').disabled=false; document.getElementById('asksend').disabled=false;
 }
+function hideAllGatePanels(){
+ document.getElementById('signinpanel').style.display='none';
+ document.getElementById('signuppanel').style.display='none';
+ document.getElementById('setpwpanel').style.display='none';
+ document.getElementById('pendingpanel').style.display='none';
+}
 function onSignedOut(){
  SESSION=null;
  document.getElementById('gate').classList.remove('off');
+ hideAllGatePanels();
  document.getElementById('signinpanel').style.display='';
- document.getElementById('setpwpanel').style.display='none';
  document.getElementById('gateemail').value=''; document.getElementById('gatepass').value='';
  document.getElementById('askin').disabled=true; document.getElementById('asksend').disabled=true;
  if(AUTH_URL_ERROR) document.getElementById('gateerr').textContent=AUTH_URL_ERROR+' Ask your admin to send a fresh link.';
@@ -1958,16 +1982,45 @@ function onSignedOut(){
 function showSetPassword(session){
  SESSION=session;
  document.getElementById('gate').classList.remove('off');
- document.getElementById('signinpanel').style.display='none';
+ hideAllGatePanels();
  document.getElementById('setpwpanel').style.display='';
+}
+function showPendingApproval(session){
+ SESSION=session;
+ document.getElementById('gate').classList.remove('off');
+ hideAllGatePanels();
+ document.getElementById('pendingemail').textContent=session.user.email||'';
+ document.getElementById('pendingpanel').style.display='';
+}
+document.getElementById('gotosignup').onclick=(e)=>{e.preventDefault();
+ document.getElementById('signinpanel').style.display='none';
+ document.getElementById('signuppanel').style.display='';};
+document.getElementById('gotosignin').onclick=(e)=>{e.preventDefault();
+ document.getElementById('signuppanel').style.display='none';
+ document.getElementById('signinpanel').style.display='';};
+document.getElementById('pendingsignout').onclick=(e)=>{e.preventDefault(); sb.auth.signOut();};
+document.getElementById('pendingrefresh').onclick=()=>handleSession(SESSION);
+
+/* A session alone doesn't mean access: self-signed-up accounts need an
+   admin to approve them in staff_profiles first (0005_staff_approval.sql).
+   If no profile row exists yet - e.g. this is the first time a session has
+   existed for this user - create the pending one now rather than leaving
+   them invisible to whoever needs to approve them. */
+async function checkApproval(session){
+ const {data}=await sb.from('staff_profiles').select('approved_at').eq('user_id',session.user.id).maybeSingle();
+ if(data) return !!data.approved_at;
+ await sb.from('staff_profiles').insert({user_id:session.user.id,email:session.user.email});
+ return false;
 }
 /* Invite and recovery links land here already signed in to a temporary
    session, established by supabase-js from the URL hash before this ever
    runs. That's not a real login yet, they haven't chosen a password, so
    route it to the set-password panel instead of straight into the app. */
-function handleSession(session){
+async function handleSession(session){
  if(!session){ onSignedOut(); return }
  if(HAD_URL_AUTH_PARAMS){ showSetPassword(session); return }
+ const approved=await checkApproval(session);
+ if(!approved){ showPendingApproval(session); return }
  onSignedIn(session);
 }
 sb.auth.onAuthStateChange((_event,session)=>handleSession(session));
@@ -1986,6 +2039,26 @@ document.getElementById('signin').onclick=async ()=>{
 document.getElementById('gatepass').addEventListener('keydown',e=>{
  if(e.key==='Enter'){e.preventDefault();document.getElementById('signin').click()}});
 
+document.getElementById('signupbtn').onclick=async ()=>{
+ const email=document.getElementById('suemail').value.trim();
+ const p1=document.getElementById('supass1').value;
+ const p2=document.getElementById('supass2').value;
+ const errEl=document.getElementById('signuperr'); errEl.textContent='';
+ if(!email||!p1){errEl.textContent='Enter your email and a password.';return}
+ if(p1.length<8){errEl.textContent='Password must be at least 8 characters.';return}
+ if(p1!==p2){errEl.textContent='Passwords do not match.';return}
+ const btn=document.getElementById('signupbtn'); btn.disabled=true;
+ const {data,error}=await sb.auth.signUp({email,password:p1});
+ btn.disabled=false;
+ if(error){errEl.textContent=error.message;return}
+ /* if the project ever has "Confirm email" turned back on, signUp returns
+    no session here and this needs a "check your email" message instead -
+    flag it rather than silently doing nothing. onAuthStateChange fires
+    handleSession automatically when a session does come back, which
+    creates the staff_profiles row and shows the pending-approval panel. */
+ if(!data.session){ errEl.style.color='#5C6B64'; errEl.textContent='Account created. Check your email to confirm before signing in.'; }
+};
+
 document.getElementById('setpwbtn').onclick=async ()=>{
  const p1=document.getElementById('newpass1').value;
  const p2=document.getElementById('newpass2').value;
@@ -1996,7 +2069,8 @@ document.getElementById('setpwbtn').onclick=async ()=>{
  const {error}=await sb.auth.updateUser({password:p1});
  btn.disabled=false;
  if(error){errEl.textContent=error.message;return}
- onSignedIn(SESSION);
+ HAD_URL_AUTH_PARAMS=false;
+ handleSession(SESSION);
 };
 document.getElementById('asksend').onclick=()=>ask(document.getElementById('askin').value);
 document.getElementById('askin').addEventListener('keydown',e=>{
