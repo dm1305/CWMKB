@@ -22,6 +22,7 @@ const ok = (name, cond, detail = '') => {
 // time". Reset before each scenario that cares about approval state.
 let approvedAt = null;
 let insertedProfile = null;
+let insertShouldFail = false;
 let lastAuthCall = null;
 
 function makeDom(url) {
@@ -48,7 +49,10 @@ function makeDom(url) {
         from: (table) => ({
           select: () => ({ eq: () => ({ maybeSingle: () =>
             Promise.resolve({ data: approvedAt !== null || table !== 'staff_profiles' ? { approved_at: approvedAt } : null }) }) }),
-          insert: (row) => { insertedProfile = row; return Promise.resolve({}); },
+          insert: (row) => {
+            if (insertShouldFail) return Promise.resolve({ error: { message: 'simulated insert failure' } });
+            insertedProfile = row; return Promise.resolve({ error: null });
+          },
         }),
       }) };
     },
@@ -79,8 +83,14 @@ async function withDom(url, fn) {
   await withDom('http://localhost:8642/current-build/cwm-knowledge-base.html#error=access_denied&error_description=Email+link+is+invalid+or+has+expired', async (win, ev) => {
     await new Promise((r) => setTimeout(r, 100));
     const doc = win.document;
-    ok('AUTH_URL_ERROR captured verbatim', ev('AUTH_URL_ERROR') === 'Email link is invalid or has expired');
     ok('gate error text shows it', doc.getElementById('gateerr').textContent.includes('Email link is invalid or has expired'));
+    // the initial boot's own onSignedOut() call (no session on this URL)
+    // is what displays it, and clears it in the same pass - confirms the
+    // fix for the stale-redisplay-on-a-later-unrelated-sign-out bug: once
+    // shown, it doesn't linger to reappear on some future sign-out that
+    // has nothing to do with the original dead link.
+    ok('AUTH_URL_ERROR is cleared after being shown once, not left to linger', ev('AUTH_URL_ERROR') === null,
+       'got ' + JSON.stringify(ev('AUTH_URL_ERROR')));
   });
 
   console.log('\n--- 3. sign-up form validation ---');
@@ -109,6 +119,17 @@ async function withDom(url, fn) {
        JSON.stringify(lastAuthCall));
     ok('signUp called with the typed email/password', lastAuthCall.args.email === 'test@example.com'
        && lastAuthCall.args.password === 'longenoughpassword');
+
+    // the mock's signUp always returns no session, so the block above just
+    // triggered the "check your email" info message, which sets the error
+    // element's color to a muted, non-error tone. A later real error must
+    // not stay stuck in that color.
+    ok('the "check your email" message uses the muted, non-error color',
+       doc.getElementById('signuperr').style.color !== '', doc.getElementById('signuperr').style.color);
+    set('supass2', 'somethingelse');
+    click('signupbtn'); await new Promise((r) => setTimeout(r, 50));
+    ok('a real error after that resets back to the default error color, not left muted',
+       doc.getElementById('signuperr').style.color === '', doc.getElementById('signuperr').style.color);
   });
 
   console.log('\n--- 4. set-password form validation (invite/recovery landing) ---');
@@ -152,6 +173,18 @@ async function withDom(url, fn) {
     await new Promise((r) => setTimeout(r, 50));
     ok('approved: gate closes, into the app', doc.getElementById('gate').classList.contains('off'));
     ok('avatar shows initials from the email', doc.getElementById('whoavatar').textContent.length > 0);
+  });
+
+  console.log('\n--- 6. checkApproval fails closed and logs when the profile-row insert fails ---');
+  await withDom(null, async (win, ev) => {
+    const errors = [];
+    win.console.error = (...args) => errors.push(args.join(' '));
+    approvedAt = null; insertShouldFail = true;
+    const approved = await ev('checkApproval').call(null, { user: { id: 'u2', email: 'x@cambridgewine.com' } });
+    insertShouldFail = false;
+    ok('treated as not approved when the insert fails, not silently approved', approved === false);
+    ok('the failure is actually logged, not swallowed', errors.some((e) => /failed to create staff_profiles row/.test(e)),
+       JSON.stringify(errors));
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
