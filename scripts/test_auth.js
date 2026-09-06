@@ -24,6 +24,8 @@ let approvedAt = null;
 let insertedProfile = null;
 let insertShouldFail = false;
 let lastAuthCall = null;
+let completionRows = [];      // rows a training_completions query should return
+let lastCompletionInsert = null;
 
 function makeDom(url) {
   return new JSDOM(html, {
@@ -47,11 +49,25 @@ function makeDom(url) {
           signOut: () => Promise.resolve({ error: null }),
         },
         from: (table) => ({
-          select: () => ({ eq: () => ({ maybeSingle: () =>
-            Promise.resolve({ data: approvedAt !== null || table !== 'staff_profiles' ? { approved_at: approvedAt } : null }) }) }),
+          select: () => ({
+            eq: () => {
+              // real supabase-js query builders are themselves thenable AND
+              // chainable - awaiting .eq(...) directly (for "give me every
+              // matching row") and calling .maybeSingle() on it (for "give
+              // me the one row or null") both need to work, matching how
+              // checkApproval and loadCompletions actually call this.
+              const rows = table === 'staff_profiles' ? (approvedAt !== null ? [{ approved_at: approvedAt }] : [])
+                : table === 'training_completions' ? completionRows : [];
+              const result = Promise.resolve({ data: rows, error: null });
+              result.maybeSingle = () => Promise.resolve({ data: rows[0] || null, error: null });
+              return result;
+            },
+          }),
           insert: (row) => {
             if (insertShouldFail) return Promise.resolve({ error: { message: 'simulated insert failure' } });
-            insertedProfile = row; return Promise.resolve({ error: null });
+            if (table === 'staff_profiles') insertedProfile = row;
+            if (table === 'training_completions') lastCompletionInsert = row;
+            return Promise.resolve({ error: null });
           },
         }),
       }) };
@@ -185,6 +201,38 @@ async function withDom(url, fn) {
     ok('treated as not approved when the insert fails, not silently approved', approved === false);
     ok('the failure is actually logged, not swallowed', errors.some((e) => /failed to create staff_profiles row/.test(e)),
        JSON.stringify(errors));
+  });
+
+  console.log('\n--- 7. training module ids are unique across courses ---');
+  await withDom(null, async (win, ev) => {
+    const ids = ev("allMods().map(m=>m.id)");
+    ok('no duplicate module ids across any course', new Set(ids).size === ids.length,
+       `${ids.length} ids, ${new Set(ids).size} unique`);
+    ok('cellar\'s pouring module resolves to itself, not comp\'s id-colliding module',
+       ev("allMods().find(m=>m.id==='cl1').t") === 'Pouring a perfect pint');
+    ok('comp\'s c1 still resolves to its own module, unaffected by the rename',
+       ev("allMods().find(m=>m.id==='c1').t") === 'Licensing Act 2003: the framework');
+  });
+
+  console.log('\n--- 8. quiz completions are actually saved and reloaded, not just kept in memory ---');
+  await withDom(null, async (win, ev) => {
+    ev("SESSION={user:{id:'u3',email:'staff@cambridgewine.com'}}");
+
+    lastCompletionInsert = null;
+    await ev('saveCompletion').call(null, 'w1', 3, 3, { 0: 1, 1: 0, 2: 2 });
+    ok('passing a quiz inserts into training_completions', lastCompletionInsert && lastCompletionInsert.module_id === 'w1',
+       JSON.stringify(lastCompletionInsert));
+    ok('the actual answers are stored, not just pass/fail',
+       lastCompletionInsert && lastCompletionInsert.answers && lastCompletionInsert.answers[0] === 1);
+    ok('recorded against the signed-in user, not left blank', lastCompletionInsert && lastCompletionInsert.user_id === 'u3');
+
+    completionRows = [{ module_id: 'w1', score: 3, completed_at: '2026-01-01T00:00:00Z' }];
+    await ev('loadCompletions').call(null);
+    const done = ev("DONE['w1']");
+    ok('a previously-saved completion is reloaded into DONE on sign-in, not lost on refresh',
+       done && done.score === 3, JSON.stringify(done));
+    ok('total is derived from the module\'s own quiz length, not just echoed from the row',
+       done && done.total === ev("allMods().find(m=>m.id==='w1').q.length"));
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
